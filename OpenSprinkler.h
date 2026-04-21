@@ -49,7 +49,6 @@
 		#include <DNSServer.h>
 		#include <Ticker.h>
 		#include "espconnect.h"
-		#include "EMailSender.h"
 		#include "ch224.h"
 	#else // for AVR
 		#include <SdFat.h>

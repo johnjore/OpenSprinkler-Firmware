@@ -676,11 +676,6 @@ void push_message(uint16_t type, uint32_t lval, float fval, uint8_t bval) {
 					} else {
 						DEBUG_PRINTF("Not a supported email_port: %i\n", email_port);
 					}
-
-					//EMailSender emailSend(email_username, email_password);
-					//emailSend.setSMTPServer(email_host);
-					//emailSend.setSMTPPort(email_port);
-					//EMailSender::Response resp = emailSend.send(email_recipient, email_message);
 				}
 			#endif
 		#else
