@@ -26,6 +26,11 @@
 #include "ArduinoJson.hpp"
 #include "opensprinkler_server.h"
 
+//ReadyMail
+#define ENABLE_SMTP
+#include "ESP_SSLClient.h"
+#include "ReadyMail.h"
+
 NotifNodeStruct* NotifQueue::head = NULL;
 NotifNodeStruct* NotifQueue::tail = NULL;
 unsigned char NotifQueue::nqueue = 0;
@@ -165,14 +170,10 @@ void push_message(uint16_t type, uint32_t lval, float fval, uint8_t bval) {
 	}
 	#endif
 
-	#if defined(ESP8266)
-		EMailSender::EMailMessage email_message;
-	#else
-		struct {
-			String subject;
-			String message;
-		} email_message;
-	#endif
+	struct {
+		String subject;
+		String message;
+	} email_message;
 
 	bool email_enabled = false;
 #if defined(SUPPORT_EMAIL)
@@ -613,10 +614,73 @@ void push_message(uint16_t type, uint32_t lval, float fval, uint8_t bval) {
 		#if defined(ARDUINO)
 			#if defined(ESP8266)
 				if(email_host && email_username && email_password && email_recipient) { // make sure all are valid
-					EMailSender emailSend(email_username, email_password);
-					emailSend.setSMTPServer(email_host);
-					emailSend.setSMTPPort(email_port);
-					EMailSender::Response resp = emailSend.send(email_recipient, email_message);
+					// Must stay in scope while SMTPClient exists
+  					WiFiClient basic_client;
+  					WiFiClientSecure ssl_client_465;
+  					ESP_SSLClient ssl_client_587;
+					static ESP_SSLClient* tls_client = nullptr;
+					tls_client = &ssl_client_587;
+  					SMTPClient* smtp = nullptr;
+
+					auto statusCallback = [](SMTPStatus status) {
+						DEBUG_PRINTF("Reply: %s\n", status.text.c_str());
+  					};
+
+  					auto startTLSCallback = [](bool& success) {
+    					success = tls_client->connectSSL();
+					};
+
+					switch (email_port) {
+						case 465:
+							ssl_client_465.setInsecure();                 		// Don't validate certs
+							ssl_client_465.setBufferSizes(1024, 1024);	  		// R and W buffers - Required on ESP8266
+
+							smtp = new SMTPClient(ssl_client_465);
+							smtp->connect(email_host, email_port, statusCallback, true);
+							break;
+
+						case 587:
+							ssl_client_587.setInsecure();						// Dont' validate certs
+							ssl_client_587.setBufferSizes(1024, 1024);			// R and W buffers - Required on ESP8266
+							ssl_client_587.setClient(&basic_client, false);
+							tls_client = &ssl_client_587;
+							smtp = new SMTPClient(ssl_client_587, startTLSCallback, true);
+							smtp->connect(email_host, email_port, statusCallback, true);
+							tls_client = nullptr; 								// clear immediately — connect() is synchronous
+							break;
+
+						default:
+							break;
+					}
+
+					if (smtp != nullptr) { 										// Only proceed if we've configured 'smtp'
+						if (smtp->isConnected()) {
+							smtp->authenticate(email_username, email_password, readymail_auth_password);
+
+							SMTPMessage msg;
+							msg.timestamp = time(nullptr);
+							msg.headers.add(rfc822_from, email_username);
+							msg.headers.add(rfc822_to, email_recipient);
+							msg.headers.add(rfc822_subject, email_message.subject);
+							msg.text.body(email_message.message);
+							
+							smtp->send(msg);
+						} else {
+							DEBUG_PRINTF("Not connected to mail host\n");
+						}
+
+						// Clean-up
+						smtp->stop();
+    					delete smtp;
+    					smtp = nullptr;
+					} else {
+						DEBUG_PRINTF("Not a supported email_port: %i\n", email_port);
+					}
+
+					//EMailSender emailSend(email_username, email_password);
+					//emailSend.setSMTPServer(email_host);
+					//emailSend.setSMTPPort(email_port);
+					//EMailSender::Response resp = emailSend.send(email_recipient, email_message);
 				}
 			#endif
 		#else
